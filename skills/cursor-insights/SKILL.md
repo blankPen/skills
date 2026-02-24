@@ -1,8 +1,7 @@
 ---
-
-## name: cursor-insights
-
+name: cursor-insights
 description: 生成分析 Agent 会话的报告；当用户想要生成一份会话的分析报告时调用
+---
 
 # Cursor Insights
 
