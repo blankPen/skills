@@ -11,7 +11,7 @@ description: 生成分析 Agent 会话的报告；当用户想要生成一份会
 
 ### 1. 内容读取
 
-- 执行 `bun run ./scripts/scan.ts` 脚本进行 Cursor 会话的扫描
+- 执行 `npx bun run ./scripts/scan.ts` 脚本进行 Cursor 会话的扫描
 - 扫描结束后，查看用户主目录下的 `.agent-insights/conversations` 目录（通过 `os.homedir()` 获取主目录，Windows 上为 `%USERPROFILE%`，macOS/Linux 上为 `~`）中的所有文件夹，让用户选择要分析的项目
 - 根据选择的目录，读取目录下的所有以 `.md` 为后缀的 Agent 对话内容
 
