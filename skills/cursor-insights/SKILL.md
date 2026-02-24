@@ -1,20 +1,23 @@
 ---
-name: open-insights
-description: 生成分析 Agent 会话的报告；当用户想要生成一份会话的分析报告时调用
----
 
-# Open Insights
+## name: cursor-insights
+
+description: 生成分析 Agent 会话的报告；当用户想要生成一份会话的分析报告时调用
+
+# Cursor Insights
 
 这个技能用于创建一份 Agent 会话分析的报告
 
 ## 处理流程
 
 ### 1. 内容读取
+
 - 执行 `bun run ./scripts/scan.ts` 脚本进行 Cursor 会话的扫描
 - 扫描结束后，查看用户主目录下的 `.agent-insights/conversations` 目录（通过 `os.homedir()` 获取主目录，Windows 上为 `%USERPROFILE%`，macOS/Linux 上为 `~`）中的所有文件夹，让用户选择要分析的项目
 - 根据选择的目录，读取目录下的所有以 `.md` 为后缀的 Agent 对话内容
 
 ### 2. 摘要总结
+
 ```
 请对 Agent 会话记录的这一部分进行摘要总结，重点关注：
 1. 用户要求了什么
@@ -28,6 +31,7 @@ description: 生成分析 Agent 会话的报告；当用户想要生成一份会
 ```
 
 ### 3. 特征提取
+
 ```
 分析这段 Agent 会话并提取结构化特征。
 
@@ -75,49 +79,57 @@ description: 生成分析 Agent 会话的报告；当用户想要生成一份会
 ```
 
 #### 目标类别
-类别	| 描述
---- | ---
-debug_investigate	| 调试/调查
-implement_feature	| 实现功能
-fix_bug	| 修复 Bug
-write_script_tool	| 编写脚本/工具
-refactor_code	| 重构代码
-configure_system	| 配置系统
-create_pr_commit	| 创建 PR/提交
-analyze_data	| 分析数据
-understand_codebase	| 理解代码库
-write_tests	| 编写测试
-write_docs	| 编写文档
-deploy_infra	| 部署/基础设施
-warmup_minimal	| 缓存预热（最小会话）
+
+
+| 类别                  | 描述         |
+| ------------------- | ---------- |
+| debug_investigate   | 调试/调查      |
+| implement_feature   | 实现功能       |
+| fix_bug             | 修复 Bug     |
+| write_script_tool   | 编写脚本/工具    |
+| refactor_code       | 重构代码       |
+| configure_system    | 配置系统       |
+| create_pr_commit    | 创建 PR/提交   |
+| analyze_data        | 分析数据       |
+| understand_codebase | 理解代码库      |
+| write_tests         | 编写测试       |
+| write_docs          | 编写文档       |
+| deploy_infra        | 部署/基础设施    |
+| warmup_minimal      | 缓存预热（最小会话） |
+
 
 #### Claude 有用程度级别：
+
 unhelpful → slightly_helpful → moderately_helpful → very_helpful → essential
 
 #### 会话类型
-类型	| 描述
---|--
-single_task	| 单一聚焦任务
-multi_task	| 一个会话中的多个任务
-iterative_refinement	| 来回迭代优化
-exploration	| 探索/理解代码库
-quick_question	| 简短问答
+
+
+| 类型                   | 描述         |
+| -------------------- | ---------- |
+| single_task          | 单一聚焦任务     |
+| multi_task           | 一个会话中的多个任务 |
+| iterative_refinement | 来回迭代优化     |
+| exploration          | 探索/理解代码库   |
+| quick_question       | 简短问答       |
+
 
 #### 主要成功类别
-类别	| 描述
--- | --
-none	| 没有显著成功
-fast_accurate_search	| 快速准确的代码搜索
-correct_code_edits	| 准确的代码修改
-good_explanations	| 清晰的解释
-proactive_help	| 超出要求的主动帮助
-multi_file_changes	| 成功协调多文件编辑
-good_debugging	| 有效的调试
 
 
+| 类别                   | 描述        |
+| -------------------- | --------- |
+| none                 | 没有显著成功    |
+| fast_accurate_search | 快速准确的代码搜索 |
+| correct_code_edits   | 准确的代码修改   |
+| good_explanations    | 清晰的解释     |
+| proactive_help       | 超出要求的主动帮助 |
+| multi_file_changes   | 成功协调多文件编辑 |
+| good_debugging       | 有效的调试     |
 
 
 ### 4. 内容分析
+
 一旦收集到所有会话数据和特征之后，它们会被汇总并通过多个专业分析提示进行处理。
 
 #### 传递给分析提示的数据
@@ -143,6 +155,7 @@ good_debugging	| 有效的调试
 ```
 
 以及文本摘要：
+
 - **会话摘要：** 最多 50 条简短摘要
 - **摩擦详情：** 从特征中提取的最多 20 条摩擦详情
 - **用户对 Claude 的指示：** 用户重复给 Claude 的最多 15 条指示
@@ -360,10 +373,12 @@ good_debugging	| 有效的调试
 最终报告输出到用户主目录下的 `.agent-insights/reports/agent-insights-report-YYYY-MM-DD.html`（主目录通过 `os.homedir()` 获取，Windows 上为 `%USERPROFILE%`，macOS/Linux 上为 `~`）
 
 ### 统计仪表盘：
+
 - 总会话数、消息数、时长、Token 数
 - Git 提交和推送数
 
 ### 报告章节：
+
 1. **一览概要** - 执行摘要
 2. **项目领域** - 你在做什么
 3. **交互风格** - 你如何与 Claude 协作
@@ -374,3 +389,4 @@ good_debugging	| 有效的调试
 8. **趣味结尾** - 一个难忘的瞬间
 
 ---
+
