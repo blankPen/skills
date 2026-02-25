@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{{报告标题}}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* ========== 基础样式 ========== */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: #f8fafc; color: #334155; line-height: 1.65; padding: 48px 24px; }
+    .container { max-width: 800px; margin: 0 auto; }
+
+    /* ========== 颜色系统 ========== */
+    /* 主色: #0f172a (标题), #334155 (正文主色), #475569/#64748b (次色) */
+    /* 背景: #f8fafc, #ffffff */
+    /* 边框: #e2e8f0 */
+    /* 蓝色强调: #2563eb, #1d4ed8 */
+    /* 绿色成功: #16a34a, #bbf7d0, #f0fdf4 */
+    /* 红色错误: #dc2626, #fca5a5, #fef2f2 */
+    /* 紫色: #8b5cf6, #e9d5ff */
+    /* 琥珀色警告: #f59e0b, #fef3c7 */
+
+    /* ========== 排版 ========== */
+    h1 { font-size: 32px; font-weight: 700; color: #0f172a; margin-bottom: 8px; }
+    h2 { font-size: 20px; font-weight: 600; color: #0f172a; margin-top: 48px; margin-bottom: 16px; }
+    .subtitle { color: #64748b; font-size: 15px; margin-bottom: 32px; }
+
+    /* ========== 导航目录 ========== */
+    .nav-toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 32px 0; padding: 16px; background: white; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .nav-toc a { font-size: 12px; color: #64748b; text-decoration: none; padding: 6px 12px; border-radius: 6px; background: #f1f5f9; transition: all 0.15s; }
+    .nav-toc a:hover { background: #e2e8f0; color: #334155; }
+
+    /* ========== 统计行 ========== */
+    .stats-row { display: flex; gap: 24px; margin-bottom: 40px; padding: 20px 0; border-top: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; }
+    .stat { text-align: center; }
+    .stat-value { font-size: 24px; font-weight: 700; color: #0f172a; }
+    .stat-label { font-size: 11px; color: #64748b; text-transform: uppercase; }
+
+    /* ========== 概览卡片 ========== */
+    .at-a-glance { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 1px solid #f59e0b; border-radius: 12px; padding: 20px 24px; margin-bottom: 32px; }
+    .glance-title { font-size: 16px; font-weight: 700; color: #92400e; margin-bottom: 16px; }
+    .glance-sections { display: flex; flex-direction: column; gap: 12px; }
+    .glance-section { font-size: 14px; color: #78350f; line-height: 1.6; }
+    .glance-section strong { color: #92400e; }
+    .see-more { color: #b45309; text-decoration: none; font-size: 13px; white-space: nowrap; }
+    .see-more:hover { text-decoration: underline; }
+
+    /* ========== 项目区域 ========== */
+    .project-areas { display: flex; flex-direction: column; gap: 12px; margin-bottom: 32px; }
+    .project-area { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
+    .area-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .area-name { font-weight: 600; font-size: 15px; color: #0f172a; }
+    .area-count { font-size: 12px; color: #64748b; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; }
+    .area-desc { font-size: 14px; color: #475569; line-height: 1.5; }
+
+    /* ========== 叙述区块 ========== */
+    .narrative { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin-bottom: 24px; }
+    .narrative p { margin-bottom: 12px; font-size: 14px; color: #475569; line-height: 1.7; }
+    .key-insight { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px 16px; margin-top: 12px; font-size: 14px; color: #166534; }
+    .section-intro { font-size: 14px; color: #64748b; margin-bottom: 16px; }
+
+    /* ========== 成就卡片 ========== */
+    .big-wins { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
+    .big-win { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; }
+    .big-win-title { font-weight: 600; font-size: 15px; color: #166534; margin-bottom: 8px; }
+    .big-win-desc { font-size: 14px; color: #15803d; line-height: 1.5; }
+
+    /* ========== 摩擦卡片 ========== */
+    .friction-categories { display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px; }
+    .friction-category { background: #fef2f2; border: 1px solid #fca5a5; border-radius: 8px; padding: 16px; }
+    .friction-title { font-weight: 600; font-size: 15px; color: #991b1b; margin-bottom: 6px; }
+    .friction-desc { font-size: 13px; color: #7f1d1d; margin-bottom: 10px; }
+    .friction-examples { margin: 0 0 0 20px; font-size: 13px; color: #334155; }
+    .friction-examples li { margin-bottom: 4px; }
+
+    /* ========== 功能卡片 ========== */
+    .claude-md-section { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+    .claude-md-section h3 { font-size: 14px; font-weight: 600; color: #1e40af; margin: 0 0 12px 0; }
+    .claude-md-actions { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #dbeafe; }
+    .copy-all-btn { background: #2563eb; color: white; border: none; border-radius: 4px; padding: 6px 12px; font-size: 12px; cursor: pointer; font-weight: 500; transition: all 0.2s; }
+    .copy-all-btn:hover { background: #1d4ed8; }
+    .copy-all-btn.copied { background: #16a34a; }
+    .claude-md-item { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; padding: 10px 0; border-bottom: 1px solid #dbeafe; }
+    .claude-md-item:last-child { border-bottom: none; }
+    .cmd-checkbox { margin-top: 2px; }
+    .cmd-code { background: white; padding: 8px 12px; border-radius: 4px; font-size: 12px; color: #1e40af; border: 1px solid #bfdbfe; font-family: monospace; display: block; white-space: pre-wrap; word-break: break-word; flex: 1; }
+    .cmd-why { font-size: 12px; color: #64748b; width: 100%; padding-left: 24px; margin-top: 4px; }
+
+    .features-section, .patterns-section { display: flex; flex-direction: column; gap: 12px; margin: 16px 0; }
+    .feature-card { background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 16px; }
+    .pattern-card { background: #f0f9ff; border: 1px solid #7dd3fc; border-radius: 8px; padding: 16px; }
+    .feature-title, .pattern-title { font-weight: 600; font-size: 15px; color: #0f172a; margin-bottom: 6px; }
+    .feature-oneliner { font-size: 14px; color: #475569; margin-bottom: 8px; }
+    .pattern-summary { font-size: 14px; color: #475569; margin-bottom: 8px; }
+    .feature-why, .pattern-detail { font-size: 13px; color: #334155; line-height: 1.5; }
+    .feature-examples { margin-top: 12px; }
+    .feature-example { padding: 8px 0; border-top: 1px solid #d1fae5; }
+    .feature-example:first-child { border-top: none; }
+    .example-desc { font-size: 13px; color: #334155; margin-bottom: 6px; }
+    .example-code-row { display: flex; align-items: flex-start; gap: 8px; }
+    .example-code { flex: 1; background: #f1f5f9; padding: 8px 12px; border-radius: 4px; font-family: monospace; font-size: 12px; color: #334155; overflow-x: auto; white-space: pre-wrap; }
+
+    .copyable-prompt-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid #e2e8f0; }
+    .copyable-prompt-row { display: flex; align-items: flex-start; gap: 8px; }
+    .copyable-prompt { flex: 1; background: #f8fafc; padding: 10px 12px; border-radius: 4px; font-family: monospace; font-size: 12px; color: #334155; border: 1px solid #e2e8f0; white-space: pre-wrap; line-height: 1.5; }
+    .feature-code { background: #f8fafc; padding: 12px; border-radius: 6px; margin-top: 12px; border: 1px solid #e2e8f0; display: flex; align-items: flex-start; gap: 8px; }
+    .feature-code code { flex: 1; font-family: monospace; font-size: 12px; color: #334155; white-space: pre-wrap; }
+    .pattern-prompt { background: #f8fafc; padding: 12px; border-radius: 6px; margin-top: 12px; border: 1px solid #e2e8f0; }
+    .pattern-prompt code { font-family: monospace; font-size: 12px; color: #334155; display: block; white-space: pre-wrap; margin-bottom: 8px; }
+    .prompt-label { font-size: 11px; font-weight: 600; text-transform: uppercase; color: #64748b; margin-bottom: 6px; }
+    .copy-btn { background: #e2e8f0; border: none; border-radius: 4px; padding: 4px 8px; font-size: 11px; cursor: pointer; color: #475569; flex-shrink: 0; }
+    .copy-btn:hover { background: #cbd5e1; }
+
+    /* ========== 图表 ========== */
+    .charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin: 24px 0; }
+    .chart-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; }
+    .chart-title { font-size: 12px; font-weight: 600; color: #64748b; text-transform: uppercase; margin-bottom: 12px; }
+    .bar-row { display: flex; align-items: center; margin-bottom: 6px; }
+    .bar-label { width: 120px; font-size: 11px; color: #475569; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bar-track { flex: 1; height: 6px; background: #f1f5f9; border-radius: 3px; margin: 0 8px; }
+    .bar-fill { height: 100%; border-radius: 3px; }
+    .bar-value { width: 28px; font-size: 11px; font-weight: 500; color: #64748b; text-align: right; }
+    .empty { color: #94a3b8; font-size: 13px; }
+
+    /* ========== 展望未来 ========== */
+    .horizon-section { display: flex; flex-direction: column; gap: 16px; }
+    .horizon-card { background: linear-gradient(135deg, #faf5ff 0%, #f5f3ff 100%); border: 1px solid #c4b5fd; border-radius: 8px; padding: 16px; }
+    .horizon-title { font-weight: 600; font-size: 15px; color: #5b21b6; margin-bottom: 8px; }
+    .horizon-possible { font-size: 14px; color: #334155; margin-bottom: 10px; line-height: 1.5; }
+    .horizon-tip { font-size: 13px; color: #6b21a8; background: rgba(255,255,255,0.6); padding: 8px 12px; border-radius: 4px; }
+
+    /* ========== 反馈模块 ========== */
+    .feedback-header { margin-top: 48px; color: #64748b; font-size: 16px; }
+    .feedback-intro { font-size: 13px; color: #94a3b8; margin-bottom: 16px; }
+    .feedback-section { margin-top: 16px; }
+    .feedback-section h3 { font-size: 14px; font-weight: 600; color: #475569; margin-bottom: 12px; }
+    .feedback-card { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+    .feedback-card.team-card { background: #eff6ff; border-color: #bfdbfe; }
+    .feedback-card.model-card { background: #faf5ff; border-color: #e9d5ff; }
+    .feedback-title { font-weight: 600; font-size: 14px; color: #0f172a; margin-bottom: 6px; }
+    .feedback-detail { font-size: 13px; color: #475569; line-height: 1.5; }
+    .feedback-evidence { font-size: 12px; color: #64748b; margin-top: 8px; }
+
+    /* ========== 趣味结尾 ========== */
+    .fun-ending { background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 1px solid #fbbf24; border-radius: 12px; padding: 24px; margin-top: 40px; text-align: center; }
+    .fun-headline { font-size: 18px; font-weight: 600; color: #78350f; margin-bottom: 8px; }
+    .fun-detail { font-size: 14px; color: #92400e; }
+
+    /* ========== 可折叠 ========== */
+    .collapsible-section { margin-top: 16px; }
+    .collapsible-header { display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 12px 0; border-bottom: 1px solid #e2e8f0; }
+    .collapsible-header h3 { margin: 0; font-size: 14px; font-weight: 600; color: #475569; }
+    .collapsible-arrow { font-size: 12px; color: #94a3b8; transition: transform 0.2s; }
+    .collapsible-content { display: none; padding-top: 16px; }
+    .collapsible-content.open { display: block; }
+    .collapsible-header.open .collapsible-arrow { transform: rotate(90deg); }
+
+    /* ========== 响应式 ========== */
+    @media (max-width: 640px) { .charts-row { grid-template-columns: 1fr; } .stats-row { justify-content: center; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- ========== 报告头部 ========== -->
+    <h1>{{报告标题}}</h1>
+    <p class="subtitle">{{会话数}} 个会话 · {{消息数}} 条消息 · {{小时}} 小时 · {{提交数}} 次提交 | {{开始日期}} 至 {{结束日期}}</p>
+
+    <!-- ========== 概览卡片 ========== -->
+    <div class="at-a-glance">
+      <div class="glance-title">概览</div>
+      <div class="glance-sections">
+        <div class="glance-section"><strong>运行良好的地方：</strong>{{优点描述}} <a href="#section-wins" class="see-more">令人印象深刻的成就 →</a></div>
+        <div class="glance-section"><strong>阻碍你的地方：</strong>{{缺点描述}} <a href="#section-friction" class="see-more">问题发生的地方 →</a></div>
+        <div class="glance-section"><strong>快速改进建议：</strong>{{建议描述}} <a href="#section-features" class="see-more">可尝试的功能 →</a></div>
+        <div class="glance-section"><strong>宏大的工作流程：</strong>{{展望描述}} <a href="#section-horizon" class="see-more">展望未来 →</a></div>
+      </div>
+    </div>
+
+    <!-- ========== 导航目录 ========== -->
+    <nav class="nav-toc">
+      <a href="#section-work">你做的工作</a>
+      <a href="#section-usage">你如何使用 CC</a>
+      <a href="#section-wins">令人印象深刻的地方</a>
+      <a href="#section-friction">问题发生的地方</a>
+      <a href="#section-features">可尝试的功能</a>
+      <a href="#section-patterns">新的使用模式</a>
+      <a href="#section-horizon">展望未来</a>
+    </nav>
+
+    <!-- ========== 统计行 ========== -->
+    <div class="stats-row">
+      <div class="stat"><div class="stat-value">{{消息总数}}</div><div class="stat-label">消息</div></div>
+      <div class="stat"><div class="stat-value">{{代码行变化}}</div><div class="stat-label">代码行</div></div>
+      <div class="stat"><div class="stat-value">{{文件数}}</div><div class="stat-label">文件</div></div>
+      <div class="stat"><div class="stat-value">{{天数}}</div><div class="stat-label">天数</div></div>
+      <div class="stat"><div class="stat-value">{{日均消息}}</div><div class="stat-label">消息/天</div></div>
+    </div>
+
+    <!-- ========== 你做的工作 ========== -->
+    <h2 id="section-work">你做的工作</h2>
+    <div class="project-areas">
+      <!-- 动态项目区域列表 -->
+      {{#each 项目区域}}
+      <div class="project-area">
+        <div class="area-header">
+          <span class="area-name">{{项目名称}}</span>
+          <span class="area-count">~{{会话数}} 个会话</span>
+        </div>
+        <div class="area-desc">{{项目描述}}</div>
+      </div>
+      {{/each}}
+    </div>
+
+    <!-- ========== 图表区域 ========== -->
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-title">{{图表标题1}}</div>
+        {{#each 图表数据1}}
+        <div class="bar-row">
+          <div class="bar-label">{{标签}}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:{{百分比}}%;background:{{颜色}}"></div></div>
+          <div class="bar-value">{{数值}}</div>
+        </div>
+        {{/each}}
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">{{图表标题2}}</div>
+        {{#each 图表数据2}}
+        <div class="bar-row">
+          <div class="bar-label">{{标签}}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:{{百分比}}%;background:{{颜色}}"></div></div>
+          <div class="bar-value">{{数值}}</div>
+        </div>
+        {{/each}}
+      </div>
+    </div>
+
+    <!-- ========== 你如何使用 Claude Code ========== -->
+    <h2 id="section-usage">你如何使用 Claude Code</h2>
+    <div class="narrative">
+      <p>{{行为分析段落1}}</p>
+      <p>{{行为分析段落2}}</p>
+      <div class="key-insight"><strong>关键模式：</strong>{{关键洞察}}</div>
+    </div>
+
+    <!-- ========== 令人印象深刻的地方 ========== -->
+    <h2 id="section-wins">令人印象深刻的地方</h2>
+    <p class="section-intro">{{成就简介}}</p>
+    <div class="big-wins">
+      {{#each 成就列表}}
+      <div class="big-win">
+        <div class="big-win-title">{{标题}}</div>
+        <div class="big-win-desc">{{描述}}</div>
+      </div>
+      {{/each}}
+    </div>
+
+    <!-- ========== 问题发生的地方 ========== -->
+    <h2 id="section-friction">问题发生的地方</h2>
+    <p class="section-intro">{{摩擦简介}}</p>
+    <div class="friction-categories">
+      {{#each 摩擦列表}}
+      <div class="friction-category">
+        <div class="friction-title">{{问题标题}}</div>
+        <div class="friction-desc">{{问题描述}}</div>
+        <ul class="friction-examples">
+          <li>{{示例1}}</li>
+          <li>{{示例2}}</li>
+        </ul>
+      </div>
+      {{/each}}
+    </div>
+
+    <!-- ========== 可尝试的功能 ========== -->
+    <h2 id="section-features">可尝试的现有 CC 功能</h2>
+    <div class="claude-md-section">
+      <h3>建议的 CLAUDE.md 添加内容</h3>
+      <p style="font-size: 12px; color: #64748b; margin-bottom: 12px;">只需将其复制到 Claude Code 中即可添加到你的 CLAUDE.md。</p>
+      <div class="claude-md-actions">
+        <button class="copy-all-btn" onclick="copyAllCheckedClaudeMd()">复制所有选中项</button>
+      </div>
+      {{#each CLAUDE.md建议}}
+      <div class="claude-md-item">
+        <input type="checkbox" id="cmd-{{索引}}" class="cmd-checkbox" checked data-text="{{建议文本}}">
+        <label for="cmd-{{索引}}">
+          <code class="cmd-code">{{显示文本}}</code>
+          <button class="copy-btn" onclick="copyCmdItem({{索引}})">复制</button>
+        </label>
+        <div class="cmd-why">{{原因说明}}</div>
+      </div>
+      {{/each}}
+    </div>
+
+    <div class="features-section">
+      {{#each 功能列表}}
+      <div class="feature-card">
+        <div class="feature-title">{{功能名称}}</div>
+        <div class="feature-oneliner">{{简述}}</div>
+        <div class="feature-why"><strong>为什么对你有帮助：</strong>{{原因}}</div>
+        <div class="feature-examples">
+          <div class="feature-example">
+            <div class="example-code-row">
+              <code class="example-code">{{代码示例}}</code>
+              <button class="copy-btn" onclick="copyText(this)">复制</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      {{/each}}
+    </div>
+
+    <!-- ========== 使用模式 ========== -->
+    <h2 id="section-patterns">使用 Claude Code 的新方法</h2>
+    <p style="font-size: 13px; color: #64748b; margin-bottom: 12px;">只需将其复制到 Claude Code 中，它将引导你完成。</p>
+    <div class="patterns-section">
+      {{#each 模式列表}}
+      <div class="pattern-card">
+        <div class="pattern-title">{{模式名称}}</div>
+        <div class="pattern-summary">{{摘要}}</div>
+        <div class="pattern-detail">{{详情}}</div>
+        <div class="copyable-prompt-section">
+          <div class="prompt-label">粘贴到 Claude Code：</div>
+          <div class="copyable-prompt-row">
+            <code class="copyable-prompt">{{可复制提示词}}</code>
+            <button class="copy-btn" onclick="copyText(this)">复制</button>
+          </div>
+        </div>
+      </div>
+      {{/each}}
+    </div>
+
+    <!-- ========== 展望未来 ========== -->
+    <h2 id="section-horizon">展望未来</h2>
+    <p class="section-intro">AI 辅助开发正在从交互式工具演变为自主系统，这些系统只需最少的人工指导就能编排复杂的多步骤工作流程。</p>
+    <div class="horizon-section">
+      {{#each 展望列表}}
+      <div class="horizon-card">
+        <div class="horizon-title">{{标题}}</div>
+        <div class="horizon-possible">{{描述}}</div>
+        <div class="horizon-tip"><strong>入门：</strong>{{入门提示}}</div>
+        <div class="pattern-prompt">
+          <div class="prompt-label">粘贴到 Claude Code：</div>
+          <code>{{提示词}}</code>
+          <button class="copy-btn" onclick="copyText(this)">复制</button>
+        </div>
+      </div>
+      {{/each}}
+    </div>
+
+    <!-- ========== 趣味结尾 ========== -->
+    <div class="fun-ending">
+      <div class="fun-headline">{{趣味标题}}</div>
+      <div class="fun-detail">{{趣味描述}}</div>
+    </div>
+
+  </div>
+
+  <script>
+    /* ========== 工具函数 ========== */
+    function toggleCollapsible(header) {
+      header.classList.toggle('open');
+      const content = header.nextElementSibling;
+      content.classList.toggle('open');
+    }
+
+    function copyText(btn) {
+      const code = btn.previousElementSibling;
+      navigator.clipboard.writeText(code.textContent).then(() => {
+        btn.textContent = '已复制!';
+        setTimeout(() => { btn.textContent = '复制'; }, 2000);
+      });
+    }
+
+    function copyCmdItem(idx) {
+      const checkbox = document.getElementById('cmd-' + idx);
+      if (checkbox) {
+        const text = checkbox.dataset.text;
+        navigator.clipboard.writeText(text).then(() => {
+          const btn = checkbox.nextElementSibling.querySelector('.copy-btn');
+          if (btn) { btn.textContent = '已复制!'; setTimeout(() => { btn.textContent = '复制'; }, 2000); }
+        });
+      }
+    }
+
+    function copyAllCheckedClaudeMd() {
+      const checkboxes = document.querySelectorAll('.cmd-checkbox:checked');
+      const texts = [];
+      checkboxes.forEach(cb => {
+        if (cb.dataset.text) { texts.push(cb.dataset.text); }
+      });
+      const combined = texts.join('\n\n');
+      const btn = document.querySelector('.copy-all-btn');
+      if (btn) {
+        navigator.clipboard.writeText(combined).then(() => {
+          btn.textContent = '已复制 ' + texts.length + ' 项!';
+          btn.classList.add('copied');
+          setTimeout(() => { btn.textContent = '复制所有选中项'; btn.classList.remove('copied'); }, 2000);
+        });
+      }
+    }
+  </script>
+</body>
+</html>
