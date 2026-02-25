@@ -1,26 +1,26 @@
 ---
 name: cursor-insights
-description: 生成分析 Agent 会话的报告；当用户想要生成一份会话的分析报告时调用
+description: 基于本地 Cursor Agent 会话记录生成使用洞察报告；仅在用户明确要求「生成会话分析报告」「做一份 Agent 使用洞察」或类似表述时调用
 ---
 
 # Cursor Insights
 
-这个技能用于创建一份 Agent 会话分析的报告
+本技能基于**本地 Cursor Agent 会话记录**，按固定流程扫描、摘要、提取特征并调用 LLM 分析，最终生成一份可交互的 HTML 使用洞察报告。
 
 ## 处理流程
 
 ### 1. 内容读取
 
-- 执行 `npx bun run ./scripts/scan.ts` 脚本进行 Cursor 会话的扫描
-- 扫描结束后，查看用户主目录下的 `.agent-insights/conversations` 目录（通过 `os.homedir()` 获取主目录，Windows 上为 `%USERPROFILE%`，macOS/Linux 上为 `~`）中的所有文件夹，让用户选择要分析的项目
-- 根据选择的目录，读取目录下的所有以 `.md` 为后缀的 Agent 对话内容
+- 执行 `npx bun run ./scripts/scan.ts` 扫描 Cursor 会话数据
+- 扫描完成后，列出用户主目录下 `.agent-insights/conversations` 中的子目录（主目录：Windows 为 `%USERPROFILE%`，macOS/Linux 为 `~`），由用户**选择要分析的项目（对应一个子目录）**
+- 根据所选目录，读取该目录下所有 `.md` 文件作为 Agent 对话内容
 
 ### 2. 摘要总结
 
 ```
 请对 Agent 会话记录的这一部分进行摘要总结，重点关注：
 1. 用户要求了什么
-2. Claude 做了什么（使用了哪些工具、修改了哪些文件）
+2. Agent 做了什么（使用了哪些工具、修改了哪些文件）
 3. 遇到的摩擦或问题
 4. 最终结果
 
@@ -31,31 +31,28 @@ description: 生成分析 Agent 会话的报告；当用户想要生成一份会
 
 ### 3. 特征提取
 
+对会话内容进行结构化特征提取，**必须**遵守以下判定规则：
+
 ```
-分析这段 Agent 会话并提取结构化特征。
+1. **goal_categories**：只统计**用户明确提出的请求**。
+   - 不统计 Agent 主动进行的代码库探索或自行决定的工作
+   - 仅在用户出现「你能…吗」「请…」「我需要…」「我们来…」等明确请求时计入
 
-重要指导原则：
+2. **user_satisfaction_counts**：只依据**用户明确表达的反馈**。
+   - 「太棒了！」「很好！」「完美！」→ happy
+   - 「谢谢」「看起来不错」「可以用了」→ satisfied
+   - 「好的，现在让我们…」（无抱怨地继续）→ likely_satisfied
+   - 「不对」「再试一次」→ dissatisfied
+   - 「这坏了」「我放弃了」→ frustrated
 
-1. **goal_categories**：仅统计用户明确要求的内容。
-   - 不要统计 Claude 自主进行的代码库探索
-   - 不要统计 Claude 自行决定要做的工作
-   - 仅当用户说"你能...吗"、"请..."、"我需要..."、"我们来..."时才统计
+3. **friction_counts**：按类型标注具体问题。
+   - misunderstood_request：Agent 理解错误
+   - wrong_approach：目标正确，但解法/思路错误
+   - buggy_code：代码无法正常运行
+   - user_rejected_action：用户拒绝或中止了某次工具调用
+   - excessive_changes：过度设计或改动范围过大
 
-2. **user_satisfaction_counts**：仅基于用户的明确反馈。
-   - "太棒了！"、"很好！"、"完美！" → happy（满意）
-   - "谢谢"、"看起来不错"、"可以用了" → satisfied（满足）
-   - "好的，现在让我们..."（继续而不抱怨）→ likely_satisfied（可能满意）
-   - "不对"、"再试一次" → dissatisfied（不满）
-   - "这坏了"、"我放弃了" → frustrated（沮丧）
-
-3. **friction_counts**：具体说明出了什么问题。
-   - misunderstood_request：Claude 理解有误
-   - wrong_approach：目标正确，但解决方案方法错误
-   - buggy_code：代码无法正常工作
-   - user_rejected_action：用户拒绝/停止了某个工具调用
-   - excessive_changes：过度设计或修改过多
-
-4. 如果会话非常短或只是热身，使用 warmup_minimal 作为目标类别
+4. 若会话极短或仅为热身，将目标类别标为 **warmup_minimal**。
 
 会话内容：
 <会话记录插入此处>
@@ -68,7 +65,7 @@ description: 生成分析 Agent 会话的报告；当用户想要生成一份会
               partially_achieved | not_achieved | 
               unclear_from_transcript",
   "user_satisfaction_counts": {"级别": 数量, ...},
-  "claude_helpfulness": "unhelpful | slightly_helpful | moderately_helpful | very_helpful | essential",
+  "agent_helpfulness": "unhelpful | slightly_helpful | moderately_helpful | very_helpful | essential",
   "session_type": "single_task | multi_task | iterative_refinement | exploration | quick_question",
   "friction_counts": {"摩擦类型": 数量, ...},
   "friction_detail": "一句话描述摩擦点，或为空",
@@ -76,6 +73,8 @@ description: 生成分析 Agent 会话的报告；当用户想要生成一份会
   "brief_summary": "一句话：用户想要什么以及是否达成"
 }
 ```
+
+（以上为特征提取的提示词内容；执行时将「<会话记录插入此处>」替换为实际会话文本。）
 
 #### 目标类别
 
@@ -97,7 +96,7 @@ description: 生成分析 Agent 会话的报告；当用户想要生成一份会
 | warmup_minimal      | 缓存预热（最小会话） |
 
 
-#### Claude 有用程度级别：
+#### Agent 有用程度级别
 
 unhelpful → slightly_helpful → moderately_helpful → very_helpful → essential
 
@@ -129,11 +128,11 @@ unhelpful → slightly_helpful → moderately_helpful → very_helpful → essen
 
 ### 4. 内容分析
 
-一旦收集到所有会话数据和特征之后，它们会被汇总并通过多个专业分析提示进行处理。
+在完成所有会话的摘要与特征提取后，将汇总数据传入多组**专项分析提示**，分别得到项目领域、交互风格、有效之处、摩擦、建议、未来展望和趣味结尾等结构化结果。
 
-#### 传递给分析提示的数据
+#### 传入分析提示的数据
 
-每个分析提示接收汇总后的统计数据：
+每组分析提示均接收同一份汇总统计数据：
 
 ```json
 {
@@ -153,18 +152,17 @@ unhelpful → slightly_helpful → moderately_helpful → very_helpful → essen
 }
 ```
 
-以及文本摘要：
+以及以下文本材料：
 
-- **会话摘要：** 最多 50 条简短摘要
-- **摩擦详情：** 从特征中提取的最多 20 条摩擦详情
-- **用户对 Claude 的指示：** 用户重复给 Claude 的最多 15 条指示
+- **会话摘要**：最多 50 条简短摘要
+- **摩擦详情**：从特征中提取的最多 20 条
+- **用户对 Agent 的指示**：用户重复给出的最多 15 条
 
 #### 4.1 项目领域分析
 
 ```
-分析这份 Agent 使用数据，识别项目领域。
-
-仅返回有效的 JSON 对象：
+分析上述 Agent 使用数据，归纳出 4–5 个项目领域。
+仅返回有效 JSON，跳过内部 CC 操作。
 
 {
   "areas": [
@@ -176,15 +174,14 @@ unhelpful → slightly_helpful → moderately_helpful → very_helpful → essen
   ]
 }
 
-包含 4-5 个领域。跳过内部 CC 操作。
+每个领域包含：name、session_count、description（2–3 句话，描述工作内容及如何使用 Agent）。
 ```
 
 #### 4.2 交互风格分析
 
 ```
-分析这份 Agent 使用数据，识别用户的交互风格。
-
-仅返回有效的 JSON 对象：
+分析上述 Agent 使用数据，归纳用户与 Agent 的交互风格。
+仅返回有效 JSON：
 
 {
   "style": "简要描述其风格（2-3 句话）",
@@ -196,9 +193,8 @@ unhelpful → slightly_helpful → moderately_helpful → very_helpful → essen
 #### 4.3 有效之处分析
 
 ```
-分析这份 Agent 使用数据，识别哪些地方运作良好。
-
-仅返回有效的 JSON 对象：
+分析上述 Agent 使用数据，识别运作良好的部分。
+仅返回有效 JSON，包含 2–3 个「重大成果」，需具体并引用实际会话：
 
 {
   "big_wins": [
@@ -209,15 +205,14 @@ unhelpful → slightly_helpful → moderately_helpful → very_helpful → essen
   ]
 }
 
-包含 2-3 个重大成果。要具体，并引用实际会话。
+每项包含 title（4–6 字）、description（2–3 句话）。
 ```
 
 #### 4.4 摩擦分析
 
 ```
-分析这份 Agent 使用数据，识别摩擦规律。
-
-仅返回有效的 JSON 对象：
+分析上述 Agent 使用数据，归纳摩擦规律。
+仅返回有效 JSON，包含 2–3 个摩擦点，诚实且有建设性：
 
 {
   "friction_points": [
@@ -229,15 +224,14 @@ unhelpful → slightly_helpful → moderately_helpful → very_helpful → essen
   ]
 }
 
-包含 2-3 个摩擦点。要诚实但有建设性。
+每项包含 category、frequency（rare | occasional | frequent）、description（2–3 句话）。
 ```
 
 #### 4.5 建议分析
 
 ```
-分析这份 Agent 使用数据并生成建议。
-
-仅返回有效的 JSON 对象：
+分析上述 Agent 使用数据并生成可执行建议。
+仅返回有效 JSON，features_to_try 与 usage_patterns 各 2–3 条，需针对其实际使用模式：
 
 {
   "features_to_try": [
@@ -256,15 +250,14 @@ unhelpful → slightly_helpful → moderately_helpful → very_helpful → essen
   ]
 }
 
-各包含 2-3 条。要针对其实际使用模式给出具体建议。
+各包含 2-3 条；建议需具体、可操作。
 ```
 
 #### 4.6 未来展望分析
 
 ```
-分析这份 Agent 使用数据，识别未来机会。
-
-仅返回有效的 JSON 对象：
+分析上述 Agent 使用数据，提炼未来 3–6 个月可尝试的机会。
+仅返回有效 JSON，包含 3 个机会，可涉及自主工作流、并行代理、对照测试迭代等：
 
 {
   "intro": "关于 AI 辅助开发演进的 1 句话",
@@ -278,61 +271,48 @@ unhelpful → slightly_helpful → moderately_helpful → very_helpful → essen
   ]
 }
 
-包含 3 个机会。大胆想象——自主工作流、并行代理、对照测试迭代。
+每项包含 intro（1 句话）、opportunities（title、whats_possible、how_to_try、copyable_prompt）。可大胆想象。
 ```
 
 #### 4.7 趣味结尾（难忘瞬间）
 
 ```
-分析这份 Agent 使用数据，找出一个难忘的瞬间。
-
-仅返回有效的 JSON 对象：
+分析上述 Agent 使用数据，从会话摘要中找出一个难忘的瞬间（有人情味、有趣或出人意料，而非统计数字）。
+仅返回有效 JSON：
 
 {
   "headline": "来自记录的令人难忘的定性瞬间——不是统计数字。要有人情味、有趣或出人意料。",
-  "detail": "关于这件事发生的时间/地点的简要背景"
+  "detail": "该瞬间发生的时间/背景简述"
 }
 
-从会话摘要中找出真正有趣或令人惊喜的内容。
+从会话摘要中选取真正有趣或令人惊喜的内容。
 ```
 
 ---
 
-### 5.生成概览
+### 5. 生成概览
 
-最后一次 LLM 调用会生成一个将所有内容串联起来的执行摘要。此提示接收所有先前生成的洞察作为上下文。
+最后进行一次 LLM 调用，将前述所有洞察汇总为「一览概要」执行摘要。该提示接收所有已生成的洞察结果作为上下文。
 
 #### 总览提示词
 
 ```
-你正在为 Agent 用户的使用洞察报告撰写"一览概要"摘要。
-目标是帮助他们了解自己的使用情况，以及如何随着模型改进更好地使用 Claude。
+你正在为 Agent 用户的使用洞察报告撰写「一览概要」。
+目标：帮助用户理解自己的使用情况，以及如何随模型演进更好地使用 Agent。
 
-使用以下 4 部分结构：
+按以下 4 部分撰写：
 
-1. **哪些有效** - 用户与 Claude 交互的独特风格是什么，
-   他们做了哪些有影响力的事情？可以包含一两个细节，
-   但保持高层次概述，因为这些内容可能已不在用户的记忆中。
-   不要空洞或过度吹捧。也不要聚焦于他们使用的工具调用。
+1. **哪些有效**：用户与 Agent 的交互风格有何特点、做了哪些有影响力的事。可含 1–2 个细节，但以高层次概述为主（用户可能已不记得具体会话）。避免空洞吹捧，也不要罗列工具调用。
 
-2. **哪些在阻碍你** - 分为（a）Claude 的问题（误解、
-   错误方法、Bug）和（b）用户侧的摩擦（提供的上下文不足、
-   环境问题——理想情况下应比单个项目更通用）。
-   要诚实但有建设性。
+2. **哪些在阻碍你**：分两类——（a）Agent 侧：误解、错误方法、Bug；（b）用户侧：上下文不足、环境问题等。尽量提炼跨项目的共性，诚实但有建设性。
 
-3. **可尝试的快速改进** - 他们可以从下方示例中尝试的具体
-   Agent 功能，或者如果你认为某个工作流技巧确实有价值
-   也可以提及。（避免像"让 Claude 在采取行动前先确认"或
-   "先写出更多上下文"这类吸引力较低的建议。）
+3. **可尝试的快速改进**：从下方示例中选取可立即尝试的 Agent 功能或工作流技巧。（避免「让 Agent 先确认再行动」「多写一点上下文」等吸引力较低的建议。）
 
-4. **为更强大模型准备的宏大工作流** - 随着未来 3-6 个月
-   内模型能力大幅提升，他们应该准备什么？哪些现在看似不可能
-   的工作流将成为可能？从下方适当章节中汲取灵感。
+4. **为更强大模型准备的宏大工作流**：未来 3–6 个月模型能力提升后，用户可提前准备什么？哪些目前难以实现的工作流将变为可能？从下方对应章节汲取灵感。
 
-每个部分保持 2-3 句不太长的话。不要让用户不知所措。
-不要提及会话数据中的具体数字统计或特定类别名称。使用辅导语气。
+每部分 2–3 句，不宜过长。不要引用会话中的具体数字或类别名。语气为辅导式。
 
-仅返回有效的 JSON 对象：
+仅返回有效 JSON：
 
 {
   "whats_working": "（参考上方说明）",
@@ -365,27 +345,27 @@ unhelpful → slightly_helpful → moderately_helpful → very_helpful → essen
 
 ---
 
-### 6.生成报告
+### 6. 生成报告
 
-所有收集到的数据和 LLM 生成的洞察都会渲染为一份可交互的 HTML 报告。HTML 模板参考 `./temp/report_temp.html`
+将前述所有汇总数据与 LLM 洞察按模板渲染为可交互的 HTML 报告。模板路径：`./temp/report_temp.html`。
 
-最终报告输出到用户主目录下的 `.agent-insights/reports/agent-insights-report-YYYY-MM-DD.html`（主目录通过 `os.homedir()` 获取，Windows 上为 `%USERPROFILE%`，macOS/Linux 上为 `~`）
+输出路径：用户主目录下 `.agent-insights/reports/agent-insights-report-YYYY-MM-DD.html`（主目录：Windows 为 `%USERPROFILE%`，macOS/Linux 为 `~`）。
 
-### 统计仪表盘：
+### 统计仪表盘
 
 - 总会话数、消息数、时长、Token 数
-- Git 提交和推送数
+- Git 提交数、推送数
 
-### 报告章节：
+### 报告章节
 
-1. **一览概要** - 执行摘要
-2. **项目领域** - 你在做什么
-3. **交互风格** - 你如何与 Claude 协作
-4. **有效之处** - 你的重大成果
-5. **摩擦点** - 哪些地方出了问题
-6. **建议** - 可尝试的功能和可采纳的模式
-7. **未来展望** - 未来的机会
-8. **趣味结尾** - 一个难忘的瞬间
+1. **一览概要**：执行摘要  
+2. **项目领域**：用户在做什么  
+3. **交互风格**：用户如何与 Agent 协作  
+4. **有效之处**：重大成果  
+5. **摩擦点**：出了哪些问题  
+6. **建议**：可尝试的功能与可采纳的模式  
+7. **未来展望**：后续可探索的机会  
+8. **趣味结尾**：一个难忘的瞬间
 
 ---
 
