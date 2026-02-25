@@ -68,8 +68,8 @@ async function loadWorkspaceMap(): Promise<Map<string, string>> {
         if (res.folder && res.folder.startsWith('file://')) {
           const p = fileURLToPath(res.folder)
           let k = '';
-          if(platform() === 'win32') {
-            k = p.split(":\\").split(sep).join('-').replace(/\./g, '').replace(/_/g, '-');
+          if (platform() === 'win32') {
+            k = p.split(":\\")[1]?.split(sep).join('-').replace(/\./g, '').replace(/_/g, '-') ?? '';
           } else {
             k = p.slice(1).split(sep).join('-').replace(/\./g, '').replace(/_/g, '-');
           }
@@ -77,6 +77,9 @@ async function loadWorkspaceMap(): Promise<Map<string, string>> {
         }
       }
     }
+    return map;
+  }).catch((err) => {
+    console.error(err);
     return map;
   });
 }
