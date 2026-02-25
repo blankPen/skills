@@ -69,7 +69,7 @@ async function loadWorkspaceMap(): Promise<Map<string, string>> {
           const p = fileURLToPath(res.folder)
           let k = '';
           if (platform() === 'win32') {
-            k = p.split(":\\")[1]?.split(sep).join('-').replace(/\./g, '').replace(/_/g, '-') ?? '';
+            k = p.replace(/[a-zA-Z]:[\\/]/, '').split(sep).join('-').replace(/\./g, '').replace(/_/g, '-') ?? '';
           } else {
             k = p.slice(1).split(sep).join('-').replace(/\./g, '').replace(/_/g, '-');
           }
