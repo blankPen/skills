@@ -6,6 +6,7 @@
 import { join, basename, dirname } from 'path';
 import { homedir } from 'os';
 import { readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync } from 'fs';
+import { execSync } from 'child_process';
 import type { AgentAdapter, AgentType, UnifiedSession, UnifiedMessage, ContentBlock } from '../core/interfaces.js';
 import { normalizePath, pathExists, getOutputDirByAgent } from '../utils/paths.js';
 import { logger } from '../utils/logger.js';
@@ -45,17 +46,14 @@ function loadParts(path: string, mid: string): OpenCodePart[] {
 }
 
 function normalize(sess: OpenCodeSession, msgs: OpenCodeMessage[], path: string, custom?: string): UnifiedSession {
-  // 收集所有消息的时间戳用于计算 duration
   const timestamps: number[] = [];
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   
   const msgs2: UnifiedMessage[] = msgs.map(m => {
-    // 提取消息级时间戳
     const msgTime = m.time?.created ? String(m.time.created) : (m.time?.completed ? String(m.time.completed) : undefined);
     if (msgTime) timestamps.push(parseInt(msgTime));
     
-    // 提取消息级 token
     if (m.tokens) {
       totalInputTokens += m.tokens.input || 0;
       totalOutputTokens += m.tokens.output || 0;
@@ -65,7 +63,6 @@ function normalize(sess: OpenCodeSession, msgs: OpenCodeMessage[], path: string,
     const content: ContentBlock[] = parts.map(p => {
       if (p.type === 'text' && p.content) return { type: 'text', data: p.content };
       if (p.type === 'reasoning') return { type: 'thinking', data: p.content || '' };
-      // OpenCode 的 tool 类型
       if (p.type === 'tool') return { type: 'tool-call', data: p };
       if (p.type === 'tool-use') return { type: 'tool-call', data: p.data || {} };
       if (p.type === 'resource') return { type: 'file', data: p.data || {} };
@@ -75,7 +72,6 @@ function normalize(sess: OpenCodeSession, msgs: OpenCodeMessage[], path: string,
     return { id: m.id, role: m.role, content, timestamp: msgTime || String(sess.time?.created) };
   });
   
-  // 计算会话起止时间
   timestamps.sort((a, b) => a - b);
   const startTime = timestamps.length > 0 ? String(timestamps[0]) : String(sess.time?.created);
   const endTime = timestamps.length > 0 ? String(timestamps[timestamps.length - 1]) : String(sess.time?.created);
@@ -131,7 +127,6 @@ function fmtTime(ts: string|number|undefined): string {
 function getStats(msgs: UnifiedMessage[], metadata?: Record<string, unknown>) {
   let u = 0, tc = 0, inT = 0, outT = 0, minT = 0, maxT = 0;
   
-  // 从 metadata 获取 message 级别的 token
   if (metadata?.inputTokens) inT += metadata.inputTokens as number;
   if (metadata?.outputTokens) outT += metadata.outputTokens as number;
   
@@ -140,7 +135,6 @@ function getStats(msgs: UnifiedMessage[], metadata?: Record<string, unknown>) {
       if (c.type === 'tool-call') {
         const d = c.data as Record<string, unknown>;
         if (d && typeof d === 'object') {
-          // 提取 token 信息 - 支持多种格式
           if (d.type === 'step-finish' || d.type === 'step_finish') {
             const tok = (d as any).tokens || (d as any).tokenUsage;
             if (tok) {
@@ -148,18 +142,15 @@ function getStats(msgs: UnifiedMessage[], metadata?: Record<string, unknown>) {
               outT += tok.output || tok.output_tokens || tok.completion_tokens || 0;
             }
           }
-          // 统计工具调用 - 支持多种类型
           const dType = (d as any).type;
           if (dType === 'tool' || dType === 'tool-use' || dType === 'tool_use' || dType === 'tool_call' || dType === 'tool-call') {
             tc++;
           }
-          // 也检查 name 或 tool 字段
           if ((d as any).name || (d as any).tool) {
             tc++;
           }
         }
       }
-      // 也检查 text 类型中是否包含 token 信息
       if (c.type === 'text') {
         const textData = c.data as string;
         if (textData && typeof textData === 'string') {
@@ -197,9 +188,86 @@ function toMd(s: UnifiedSession): string {
   const bs = s.messages.map(({role, content}) => '---\n**' + role.charAt(0).toUpperCase() + role.slice(1) + '**\n\n' + content.map(parseContent).filter(Boolean).join('\n\n') + '\n');
   return f + bs.join('\n');
 }
+
 function write(s: UnifiedSession, pn: string) {
   const p = join(getOutputDirByAgent('opencode'), pn, s.id + '.md');
   try { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, toMd(s)); logger.info('已写入: ' + p); } catch (e) { logger.warn('写入失败: ' + p, e); }
+}
+
+/**
+ * 将会话转换为 JSON 格式
+ */
+function sessionToJson(s: UnifiedSession): object {
+  const st = getStats(s.messages, s.metadata);
+  
+  return {
+    conv_id: s.id,
+    project_name: s.title,
+    project_path: s.directory,
+    start_time: fmtTime(s.startTime),
+    end_time: fmtTime(s.endTime),
+    duration: st.durF,
+    user_messages: st.u,
+    tool_calls: st.tc,
+    input_tokens: st.inT,
+    output_tokens: st.outT,
+    agent: 'opencode',
+    messages: s.messages.map(({ role, content }) => ({
+      role,
+      content: content.map(c => {
+        if (c.type === 'text') return { type: c.type, data: c.data };
+        if (c.type === 'thinking') return { type: c.type, data: c.data };
+        if (c.type === 'tool-call') return { type: c.type, data: c.data };
+        if (c.type === 'file') return { type: c.type, data: c.data };
+        return { type: c.type, data: c.data };
+      }),
+      timestamp: s.timestamp
+    }))
+  };
+}
+
+/**
+ * 获取 Git 信息
+ */
+function getGitInfo(projectPath: string): { branch: string; remote: string; commits: number } {
+  const result = { branch: '', remote: '', commits: 0 };
+  try {
+    if (!existsSync(projectPath)) return result;
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: projectPath, encoding: 'utf-8', timeout: 5000 }).trim();
+    result.branch = branch;
+    const remote = execSync('git remote get-url origin', { cwd: projectPath, encoding: 'utf-8', timeout: 5000 }).trim();
+    result.remote = remote;
+  } catch { /* ignore */ }
+  return result;
+}
+
+/**
+ * 写入会话 JSON 文件
+ */
+function writeSessionJson(s: UnifiedSession, pn: string): void {
+  const p = join(getOutputDirByAgent('opencode'), pn, s.id + '.json');
+  try { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, JSON.stringify(sessionToJson(s), null, 2)); logger.debug('已写入 JSON: ' + p); } catch (e) { logger.warn('写入 JSON 失败: ' + p, e); }
+}
+
+/**
+ * 写入 project.json 文件
+ */
+function writeProjectJson(projectName: string, projectPath: string, sessionCount: number): void {
+  const gitInfo = getGitInfo(projectPath);
+  const projectJson = {
+    project_name: projectName,
+    project_path: projectPath,
+    agent: 'opencode',
+    session_count: sessionCount,
+    git: {
+      branch: gitInfo.branch,
+      remote: gitInfo.remote,
+      commits: gitInfo.commits
+    },
+    scanned_at: new Date().toISOString()
+  };
+  const p = join(getOutputDirByAgent('opencode'), projectName, 'project.json');
+  try { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, JSON.stringify(projectJson, null, 2)); logger.debug('已写入 project.json: ' + p); } catch (e) { logger.warn('写入 project.json 失败: ' + p, e); }
 }
 
 export class OpenCodeAdapter implements AgentAdapter {
@@ -215,6 +283,10 @@ export class OpenCodeAdapter implements AgentAdapter {
     if (!existsSync(p)) { logger.warn('目录不存在: ' + p); return []; }
     const sessions = loadSessions(p);
     const results: UnifiedSession[] = [];
+    
+    // 追踪每个项目的会话数
+    const projectSessionCounts: Map<string, { path: string; count: number }> = new Map();
+    
     logger.info('找到 ' + sessions.length + ' 个会话');
     for (const sess of sessions) {
       try {
@@ -225,9 +297,22 @@ export class OpenCodeAdapter implements AgentAdapter {
         // 过滤: 会话时长<1分钟 且 用户消息<2
         if (st.dur < 60 && st.u < 2) { logger.debug('过滤 ' + sess.id + ': msg=' + st.u + ', dur=' + st.dur); continue; }
         results.push(u);
-        write(u, basename(u.directory) || 'unknown');
+        const projectName = basename(u.directory) || 'unknown';
+        write(u, projectName);
+        // 写入 JSON
+        writeSessionJson(u, projectName);
+        
+        // 记录项目信息
+        const current = projectSessionCounts.get(projectName) || { path: u.directory, count: 0 };
+        projectSessionCounts.set(projectName, { path: u.directory, count: current.count + 1 });
       } catch (e) { logger.warn('处理失败: ' + sess.id, e); }
     }
+    
+    // 为每个项目生成 project.json
+    for (const [projectName, info] of projectSessionCounts) {
+      writeProjectJson(projectName, info.path, info.count);
+    }
+    
     logger.info('完成: ' + results.length + ' 个会话');
     return results;
   }

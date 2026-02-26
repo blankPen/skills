@@ -7,6 +7,7 @@
 import { join, basename, dirname } from 'path';
 import { homedir } from 'os';
 import { readFileSync, existsSync, statSync, readdirSync, mkdirSync, writeFileSync } from 'fs';
+import { execSync } from 'child_process';
 import type { AgentAdapter, AgentType, UnifiedSession, UnifiedMessage, ContentBlock } from '../core/interfaces.js';
 import { normalizePath, pathExists, getOutputDirByAgent } from '../utils/paths.js';
 import { logger } from '../utils/logger.js';
@@ -26,7 +27,7 @@ interface ClaudeCodeRow {
     model?: string;
   };
   toolUseMessages?: unknown[];
-  isSidechain?: boolean;
+  isSidechain?: string;
 }
 
 /**
@@ -50,17 +51,14 @@ function getSessionStats(messages: UnifiedMessage[], metadata?: Record<string, u
   let minTime = 0;
   let maxTime = 0;
 
-  // 从 metadata 获取 token 信息
   if (metadata?.inputTokens) inputTokens = metadata.inputTokens as number;
   if (metadata?.outputTokens) outputTokens = metadata.outputTokens as number;
 
   for (const m of messages) {
     for (const c of m.content) {
-      // 统计工具调用 - 支持多种类型
       if (c.type === 'tool-call' || c.type === 'tool_use' || c.type === 'tool_use') {
         toolCalls++;
       }
-      // 检查 text 内容中是否包含 tool_use 信息
       if (c.type === 'text') {
         const data = c.data as string;
         if (data && data.includes('"type":"tool_use"')) {
@@ -72,16 +70,13 @@ function getSessionStats(messages: UnifiedMessage[], metadata?: Record<string, u
       }
     }
 
-    // 统计用户消息
     if (m.role === 'user' && m.content.some(c => c.type === 'text' || c.type === 'thinking')) {
       userMessages++;
     }
 
-    // 时间戳处理 - 支持 ISO 字符串格式
     if (m.timestamp) {
       let t: number;
       if (typeof m.timestamp === 'string') {
-        // 处理 ISO 8601 格式
         t = new Date(m.timestamp).getTime();
       } else {
         t = parseInt(String(m.timestamp));
@@ -172,7 +167,6 @@ function normalizeToUnified(
           content = [{ type: 'text', data: JSON.stringify(row.message.content) }];
         }
 
-        // 处理工具调用
         if (row.toolUseMessages && Array.isArray(row.toolUseMessages)) {
           for (const toolMsg of row.toolUseMessages) {
             content.push({
@@ -196,7 +190,6 @@ function normalizeToUnified(
     }
   });
 
-  // 计算统计信息
   const stats = getSessionStats(messages, { inputTokens: totalInputTokens, outputTokens: totalOutputTokens });
 
   if (!sessionId) return null;
@@ -373,11 +366,56 @@ ${body}
 }
 
 /**
+ * 将会话转换为 JSON 格式
+ */
+function sessionToJson(session: UnifiedSession): object {
+  const stats = getSessionStats(session.messages, session.metadata);
+  
+  return {
+    conv_id: session.id,
+    project_name: session.title,
+    project_path: session.directory,
+    start_time: formatTime(session.startTime),
+    end_time: formatTime(session.endTime),
+    duration: stats.durationStr,
+    user_messages: stats.userMessages,
+    tool_calls: stats.toolCalls,
+    input_tokens: stats.inputTokens,
+    output_tokens: stats.outputTokens,
+    agent: 'claude-code',
+    messages: session.messages.map(({ role, content }) => ({
+      role,
+      content: content.map(c => {
+        if (c.type === 'text') return { type: c.type, data: c.data };
+        if (c.type === 'thinking') return { type: c.type, data: c.data };
+        if (c.type === 'tool-call') return { type: c.type, data: c.data };
+        return { type: c.type, data: c.data };
+      }),
+      timestamp: session.timestamp
+    }))
+  };
+}
+
+/**
+ * 获取 Git 信息
+ */
+function getGitInfo(projectPath: string): { branch: string; remote: string; commits: number } {
+  const result = { branch: '', remote: '', commits: 0 };
+  try {
+    if (!existsSync(projectPath)) return result;
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: projectPath, encoding: 'utf-8', timeout: 5000 }).trim();
+    result.branch = branch;
+    const remote = execSync('git remote get-url origin', { cwd: projectPath, encoding: 'utf-8', timeout: 5000 }).trim();
+    result.remote = remote;
+  } catch { /* ignore */ }
+  return result;
+}
+
+/**
  * 写入会话到 Markdown 文件
  */
 function writeSessionToFile(session: UnifiedSession, projectName: string): void {
   const outPath = join(getOutputDirByAgent('claude-code'), projectName, session.id + '.md');
-
   try {
     mkdirSync(dirname(outPath), { recursive: true });
     const markdown = sessionToMarkdown(session);
@@ -385,6 +423,47 @@ function writeSessionToFile(session: UnifiedSession, projectName: string): void 
     logger.info(`已写入: ${outPath}`);
   } catch (e) {
     logger.warn(`写入文件失败: ${outPath}`, e);
+  }
+}
+
+/**
+ * 写入会话 JSON 文件
+ */
+function writeSessionJson(session: UnifiedSession, projectName: string): void {
+  const outPath = join(getOutputDirByAgent('claude-code'), projectName, session.id + '.json');
+  try {
+    mkdirSync(dirname(outPath), { recursive: true });
+    writeFileSync(outPath, JSON.stringify(sessionToJson(session), null, 2));
+    logger.debug(`已写入 JSON: ${outPath}`);
+  } catch (e) {
+    logger.warn(`写入 JSON 失败: ${outPath}`, e);
+  }
+}
+
+/**
+ * 写入 project.json 文件
+ */
+function writeProjectJson(projectName: string, projectPath: string, sessionCount: number): void {
+  const gitInfo = getGitInfo(projectPath);
+  const projectJson = {
+    project_name: projectName,
+    project_path: projectPath,
+    agent: 'claude-code',
+    session_count: sessionCount,
+    git: {
+      branch: gitInfo.branch,
+      remote: gitInfo.remote,
+      commits: gitInfo.commits
+    },
+    scanned_at: new Date().toISOString()
+  };
+  const outPath = join(getOutputDirByAgent('claude-code'), projectName, 'project.json');
+  try {
+    mkdirSync(dirname(outPath), { recursive: true });
+    writeFileSync(outPath, JSON.stringify(projectJson, null, 2));
+    logger.debug(`已写入 project.json: ${outPath}`);
+  } catch (e) {
+    logger.warn(`写入 project.json 失败: ${outPath}`, e);
   }
 }
 
@@ -422,18 +501,25 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     }
 
     const sessions: UnifiedSession[] = [];
+    
+    // 追踪每个项目的会话数
+    const projectSessionCounts: Map<string, { path: string; count: number }> = new Map();
 
     try {
       const entries = readdirSync(scanPath, { withFileTypes: true });
 
       for (const entry of entries) {
         if (entry.isDirectory()) {
-          const projectPath = join(scanPath, entry.name);
-          const projectSessions = await scanProject(projectPath, entry.name, customPath);
+          let projectName = entry.name;
+          let projectPath = '';
+          const projectSessions = await scanProject(join(scanPath, entry.name), entry.name, customPath);
 
           // 写入 Markdown 文件并过滤
+          let writtenCount = 0;
           for (const session of projectSessions) {
             const stats = getSessionStats(session.messages);
+            projectName = session.title;
+            projectPath = session.directory;
             // 过滤: 会话时长<1分钟 且 用户消息<2
             if (stats.duration < 60 && stats.userMessages < 2) {
               logger.debug(`过滤 ${session.id}: msg=${stats.userMessages}, dur=${stats.duration}`);
@@ -441,6 +527,14 @@ export class ClaudeCodeAdapter implements AgentAdapter {
             }
             const name = session.title || entry.name;
             writeSessionToFile(session, name);
+            // 写入 JSON
+            writeSessionJson(session, name);
+            writtenCount++;
+          }
+          
+          // 记录项目信息用于生成 project.json
+          if (writtenCount > 0) {
+            projectSessionCounts.set(projectName, { path: projectPath, count: writtenCount });
           }
 
           sessions.push(...projectSessions);
@@ -459,6 +553,12 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       }
       return true;
     });
+
+    // 为每个项目生成 project.json
+    for (const [projectName, info] of projectSessionCounts) {
+      console.log('projectName', projectName, info);
+      writeProjectJson(projectName, info.path, info.count);
+    }
 
     logger.info(`ClaudeCode 扫描完成: ${filteredSessions.length} 个会话 (过滤了 ${sessions.length - filteredSessions.length} 个)`);
     return filteredSessions;

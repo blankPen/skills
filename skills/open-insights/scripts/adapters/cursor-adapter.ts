@@ -7,6 +7,7 @@ import { join, dirname, basename, sep } from 'path';
 import { homedir, platform } from 'os';
 import { readFileSync, existsSync, statSync, writeFileSync, readdirSync, mkdirSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 import type { AgentAdapter, AgentType, UnifiedSession } from '../core/interfaces.js';
 import { normalizePath, pathExists, getOutputDirByAgent } from '../utils/paths.js';
 import { logger } from '../utils/logger.js';
@@ -49,7 +50,7 @@ async function loadWorkspaceMap(): Promise<Map<string, string>> {
         if (res.folder && res.folder.startsWith('file://')) {
           const p = fileURLToPath(res.folder);
           let k = '';
-          if (platform() === 'win32') k = p.replace(/[a-zA-Z]:[\\\/]/, '').split(sep).join('-').replace(/\./g, '').replace(/_/g, '-') || '';
+          if (platform() === 'win32') k = p.replace(/[a-zA-Z]:[\/\\]/, '').split(sep).join('-').replace(/\./g, '').replace(/_/g, '-') || '';
           else k = p.slice(1).split(sep).join('-').replace(/\./g, '').replace(/_/g, '-');
           map.set(k, p);
         }
@@ -161,6 +162,103 @@ function convToMarkdown(conv: { id: string; projectName: string; projectPath: st
   return front + blocks.join('\n');
 }
 
+/**
+ * 将会话转换为 JSON 格式
+ */
+function convToJson(conv: { id: string; projectName: string; projectPath: string; startTime: string; endTime: string; messages: Array<{ role: string; content: any[]; timestamp?: string }> }): object {
+  const stats = getCursorStats(conv.messages);
+  let durF = stats.durF;
+  if (stats.dur === 0 && conv.startTime && conv.endTime) {
+    const start = new Date(conv.startTime).getTime();
+    const end = new Date(conv.endTime).getTime();
+    if (end > start) {
+      const dur = Math.round((end - start) / 1000);
+      durF = dur > 0 ? Math.floor(dur/60)+'m'+(dur%60)+'s' : '0s';
+    }
+  }
+  
+  return {
+    conv_id: conv.id,
+    project_name: conv.projectName,
+    project_path: conv.projectPath,
+    start_time: formatTime(conv.startTime),
+    end_time: formatTime(conv.endTime),
+    duration: durF,
+    user_messages: stats.userMsg,
+    tool_calls: stats.toolCalls,
+    input_tokens: stats.inTok,
+    output_tokens: stats.outTok,
+    agent: 'cursor',
+    messages: conv.messages.map(({ role, content }) => ({
+      role,
+      content: content.map(c => {
+        if (c.type === 'text') return { type: c.type, text: c.text || '' };
+        if (c.type === 'thinking') return { type: c.type, thinking: c.thinking || '' };
+        if (c.type === 'code_selection') return { type: c.type, text: c.text || '' };
+        if (c.type === 'attached_files') return { type: c.type, text: c.text || '' };
+        return { type: c.type };
+      })
+    }))
+  };
+}
+
+/**
+ * 获取 Git 信息
+ */
+function getGitInfo(projectPath: string): { branch: string; remote: string; commits: number } {
+  const result = { branch: '', remote: '', commits: 0 };
+  try {
+    if (!existsSync(projectPath)) return result;
+    // 获取当前分支
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: projectPath, encoding: 'utf-8', timeout: 5000 }).trim();
+    result.branch = branch;
+    // 获取 remote
+    const remote = execSync('git remote get-url origin', { cwd: projectPath, encoding: 'utf-8', timeout: 5000 }).trim();
+    result.remote = remote;
+  } catch { /* ignore */ }
+  return result;
+}
+
+/**
+ * 写入会话 JSON 文件
+ */
+function writeSessionJson(conv: { id: string; projectName: string; projectPath: string; startTime: string; endTime: string; messages: Array<{ role: string; content: any[]; timestamp?: string }> }, projectName: string): void {
+  const outPath = join(getOutputDirByAgent('cursor'), projectName, conv.id + '.json');
+  try {
+    ensureDirSync(dirname(outPath));
+    writeFileSync(outPath, JSON.stringify(convToJson(conv), null, 2));
+    logger.debug('已写入 JSON: ' + outPath);
+  } catch (e) {
+    logger.warn('写入 JSON 失败: ' + outPath, e);
+  }
+}
+
+/**
+ * 写入 project.json 文件
+ */
+function writeProjectJson(projectName: string, projectPath: string, sessionCount: number): void {
+  const gitInfo = getGitInfo(projectPath);
+  const projectJson = {
+    project_name: projectName,
+    project_path: projectPath,
+    agent: 'cursor',
+    session_count: sessionCount,
+    git: {
+      branch: gitInfo.branch,
+      remote: gitInfo.remote,
+      commits: gitInfo.commits
+    },
+    scanned_at: new Date().toISOString()
+  };
+  const outPath = join(getOutputDirByAgent('cursor'), projectName, 'project.json');
+  try {
+    ensureDirSync(dirname(outPath));
+    writeFileSync(outPath, JSON.stringify(projectJson, null, 2));
+    logger.debug('已写入 project.json: ' + outPath);
+  } catch (e) {
+    logger.warn('写入 project.json 失败: ' + outPath, e);
+  }
+}
 
 export class CursorAdapter implements AgentAdapter {
   readonly name: AgentType = 'cursor';
@@ -193,6 +291,9 @@ export class CursorAdapter implements AgentAdapter {
     const workspaceMap = await loadWorkspaceMap();
     const sessions: UnifiedSession[] = [];
     let totalConvs = 0;
+    
+    // 追踪每个项目的会话数
+    const projectSessionCounts: Map<string, { path: string; count: number }> = new Map();
 
     // 尝试两种目录结构
     const findTranscripts = (dir: string): string[] => {
@@ -237,6 +338,9 @@ export class CursorAdapter implements AgentAdapter {
           ensureDirSync(dirname(outPath));
           writeFileSync(outPath, convToMarkdown(conv));
           
+          // 写入 JSON
+          writeSessionJson(conv, projectName);
+          
           // 添加到结果集
           sessions.push({
             id: convId,
@@ -258,6 +362,12 @@ export class CursorAdapter implements AgentAdapter {
           count++;
         } catch (e) { logger.warn('处理会话失败: ' + filePath, e); }
       }
+      
+      // 记录项目信息用于生成 project.json
+      if (count > 0) {
+        projectSessionCounts.set(projectName, { path: projectPath, count });
+      }
+      
       return count;
     };
 
@@ -269,6 +379,11 @@ export class CursorAdapter implements AgentAdapter {
       } else if (entry.name.endsWith('.jsonl')) {
         totalConvs += processDir(scanPath, 'unknown');
       }
+    }
+
+    // 为每个项目生成 project.json
+    for (const [projectName, info] of projectSessionCounts) {
+      writeProjectJson(projectName, info.path, info.count);
     }
 
     logger.info('Cursor 扫描完成: ' + totalConvs + ' 个会话');
