@@ -1,5 +1,10 @@
 #!/usr/bin/env bun
 
+/**
+ * Git 提交记录搜索工具
+ * 获取指定日期/时间范围内的 Git 提交记录
+ */
+
 interface GitCommit {
   hash: string;
   repo: string;
@@ -11,17 +16,12 @@ interface GitCommit {
   additions: number;
   deletions: number;
 }
-
-interface Output {
-  date: string;
-  time_range: { start: string; end: string };
-  commits: GitCommit[];
-  total: number;
-}
-
 interface Options {
   workspaces?: string[];
   date?: string;
+  days?: number;
+  author?: string;
+  all?: boolean; // 是否显示所有作者，默认为 false（只显示自己）
 }
 
 function parseArgs(): Options {
@@ -33,28 +33,49 @@ function parseArgs(): Options {
       options.workspaces = arg.slice(13).split(",");
     } else if (arg.startsWith("--date=")) {
       options.date = arg.slice(7);
+    } else if (arg.startsWith("--days=")) {
+      options.days = parseInt(arg.slice(7), 10);
+    } else if (arg === "--all") {
+      options.all = true;
+    }
+  }
+
+  // 自动获取 git 用户名作为 author 过滤
+  if (!options.author && !options.all) {
+    const gitUser = getGitUser();
+    if (gitUser) {
+      options.author = gitUser;
     }
   }
 
   return options;
 }
 
-function getRepos(options: Options): string[] {
-  // 默认扫描 workspace，自动查找所有 git 仓库
-  return scanWorkspaceForGitRepos(options);
+/**
+ * 获取当前 Git 用户名
+ */
+function getGitUser(): string | null {
+  try {
+    const name = execSync(`git config --global user.name`, { encoding: "utf-8" }).trim();
+    return name || null;
+  } catch {
+    return null;
+  }
+}
+
+function home(): string {
+  return process.env.HOME || "/Users/admin";
 }
 
 /**
  * 递归扫描目录下的所有 Git 仓库
+ * @param maxDepthInsideRepo 在发现 .git 目录后，最多继续深入扫描的层数
  */
-function scanWorkspaceForGitRepos(options: Options): string[] {
-  const workspaces = options.workspaces || [join(home())];
+function scanWorkspaceForGitRepos(options: Options, maxDepthInsideRepo: number = 3): string[] {
+  const workspaces = options.workspaces || [home()];
   const gitRepos: string[] = [];
 
   function scanDir(dir: string, depth: number = 0): void {
-    // console.log(`Scanning ${dir} at depth ${depth}`);
-    // if (depth > 3) return; // 限制递归深度
-
     try {
       const entries = require("fs").readdirSync(dir, { withFileTypes: true });
 
@@ -62,122 +83,151 @@ function scanWorkspaceForGitRepos(options: Options): string[] {
         if (!entry.isDirectory()) continue;
 
         // 跳过常见不需要扫描的目录
-        if (entry.name.startsWith(".") ||
+        if (
+          entry.name.startsWith(".") ||
           entry.name === "node_modules" ||
           entry.name === "vendor" ||
-          entry.name === "vendor/bundle" ||
           entry.name === "dist" ||
-          entry.name === "build" ||
-          entry.name === ".git") continue;
+          entry.name === "build"
+        ) continue;
 
-        const fullPath = join(dir, entry.name);
+        const fullPath = require("path").join(dir, entry.name);
 
         // 检查是否是 git 仓库
-        if (require("fs").existsSync(join(fullPath, ".git"))) {
+        if (require("fs").existsSync(require("path").join(fullPath, ".git"))) {
           gitRepos.push(fullPath);
-          continue; // 不继续深入扫描 git 仓库内部
+          // 找到 .git 后，不再继续深入扫描该仓库内部
+          continue;
         }
 
-        // 继续递归扫描子目录
-        scanDir(fullPath, depth + 1);
+        // 继续递归扫描子目录（最多深入 maxDepthInsideRepo 层）
+        if (depth < maxDepthInsideRepo) {
+          scanDir(fullPath, depth + 1);
+        }
       }
     } catch {
       // 忽略无法访问的目录
     }
   }
 
-  workspaces.map(workspace => {
+  for (const workspace of workspaces) {
     if (require("fs").existsSync(workspace)) {
       scanDir(workspace);
-      console.log(`Found ${gitRepos.length} git repositories in ${workspace}`);
     }
-  });
-
-  // if (require("fs").existsSync(workspace)) {
-  //   scanDir(workspace);
-  // }
-
+  }
 
   return gitRepos;
 }
 
-function home(): string {
-  return process.env.HOME || "/Users/admin";
-}
-
-function join(...paths: string[]): string {
-  return paths.join("/");
-}
-
-function getDateDir(date: string): string {
-  return join(home(), ".x-git-commits", date);
-}
-
-function ensureDir(dir: string): void {
-  const fs = require("fs");
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-}
-
-function getCommitsForRepo(repoPath: string, date: string): GitCommit[] {
+/**
+ * 从指定时间范围获取提交记录
+ * @param author 如果指定，则只查询该作者的提交
+ */
+function getCommitsForRepo(repoPath: string, since: string, until: string, author?: string): GitCommit[] {
   const commits: GitCommit[] = [];
-  const repoName = repoPath.split("/").pop() || repoPath;
+  let repoName = repoPath.split("/").pop() || repoPath;
 
   try {
-    const since = `${date} 00:00:00`;
-    const until = `${date} 23:59:59`;
+    const gitRemote = execSync(`git -C "${repoPath}" remote get-url origin`, { encoding: "utf-8", silent: true }).trim();
 
-    // Get commit hashes for the date
-    const logCmd = `git -C "${repoPath}" log --since="${since}" --until="${until}" --format="%H|%an|%ae|%s|%ci" --name-only`;
+    if (gitRemote) {
+      if (gitRemote.startsWith("git@")) {
+        repoName = gitRemote.split(":")[1].split(".git")[0];
+      } else if (gitRemote.startsWith("https://")) {
+        const [, ...rest] = gitRemote.replace("https://", "").split("/")
+        repoName = rest.join("/").split(".git")[0];
+      }
+    }
+
+    // 查询指定时间范围内的 commit 记录
+    const authorFilter = author ? `--author="${author}"` : "";
+    const logCmd = `git -C "${repoPath}" log ${authorFilter} --since="${since}" --until="${until}" --format="%H|%an|%ae|%s|%ci" --name-only`;
     const logOutput = execSync(logCmd, { encoding: "utf-8", silent: true });
 
-    const entries = logOutput.trim().split("\n\n").filter(Boolean);
+    // 逐行解析 git log 输出：
+    // 格式: hash|author|email|subject|date
+    //       filename1
+    //       filename2
+    //       (空行)
+    //       next-commit...
+    const lines = logOutput.split("\n");
+    let i = 0;
+    let currentCommit: Partial<GitCommit> | null = null;
 
-    for (const entry of entries) {
-      const lines = entry.split("\n");
-      if (lines.length === 0) continue;
+    while (i < lines.length) {
+      const line = lines[i];
 
-      const header = lines[0].split("|");
-      if (header.length < 5) continue;
+      // 检查是否是空行
+      if (!line.trim()) {
+        i++;
+        continue;
+      }
 
-      const [hash, author, email, subject, dateStr] = header;
-      const files = lines.slice(1).filter(Boolean);
+      // 检查是否是 commit header（以 40 位 hash 开头）
+      if (line.match(/^[0-9a-f]{40}\|/)) {
+        // 保存上一个 commit
+        if (currentCommit && currentCommit.hash) {
+          commits.push(currentCommit as GitCommit);
+        }
 
-      // Get diff stats for this commit
-      let additions = 0;
-      let deletions = 0;
+        // 解析新的 commit header
+        const parts = line.split("|");
+        if (parts.length >= 5) {
+          currentCommit = {
+            hash: parts[0],
+            author: parts[1],
+            email: parts[2],
+            subject: parts[3],
+            date: parts[4].split(" +")[0],
+            files: [],
+            additions: 0,
+            deletions: 0,
+            repo: repoName,
+          };
+        }
+        i++;
+        continue;
+      }
+
+      // 否则是文件名（属于当前 commit）
+      if (currentCommit && line.trim()) {
+        currentCommit.files = currentCommit.files || [];
+        currentCommit.files.push(line.trim());
+      }
+
+      i++;
+    }
+
+    // 保存最后一个 commit
+    if (currentCommit && currentCommit.hash) {
+      commits.push(currentCommit as GitCommit);
+    }
+
+    // 获取每个 commit 的统计信息
+    for (const commit of commits) {
       try {
-        const statsCmd = `git -C "${repoPath}" show --stat --format="" ${hash}`;
+        const statsCmd = `git -C "${repoPath}" show --stat --format="" ${commit.hash}`;
         const statsOutput = execSync(statsCmd, { encoding: "utf-8" });
         const statsLines = statsOutput.trim().split("\n");
 
-        for (const line of statsLines) {
-          const match = line.match(/(\d+)\s+(\d+)/);
-          if (match) {
-            additions += parseInt(match[1], 10);
-            deletions += parseInt(match[2], 10);
+        for (const statsLine of statsLines) {
+          // 匹配格式: " N +" 表示插入行数
+          const insertionMatch = statsLine.match(/(\d+)\s+\+/);
+          // 匹配格式: " N -" 表示删除行数
+          const deletionMatch = statsLine.match(/(\d+)\s+-/);
+          if (insertionMatch) {
+            commit.additions += parseInt(insertionMatch[1], 10);
+          }
+          if (deletionMatch) {
+            commit.deletions += parseInt(deletionMatch[1], 10);
           }
         }
       } catch {
         // Ignore errors getting stats
       }
-
-      commits.push({
-        hash,
-        repo: repoName,
-        author,
-        email,
-        subject,
-        date: dateStr,
-        files,
-        additions,
-        deletions,
-      });
     }
-  } catch (error) {
+  } catch {
     // Repo might not have commits on this date, or not be a git repo
-    // console.error(`Error getting commits from ${repoPath}:`, error.message);
   }
 
   return commits;
@@ -185,55 +235,119 @@ function getCommitsForRepo(repoPath: string, date: string): GitCommit[] {
 
 function execSync(cmd: string, options: any): string {
   const { execSync: sync } = require("child_process");
-  // 静默执行，忽略 stderr 输出，避免 git 错误信息干扰
   return sync(cmd, { ...options, stdio: "pipe" }) as string;
 }
-function main() {
-  const options = parseArgs();
-  const date = options.date || new Date().toISOString().split("T")[0];
-  const repos = getRepos(options);
 
-  const allCommits: GitCommit[] = [];
-  let startTime = "";
-  let endTime = "";
+/**
+ * 格式化时间范围显示
+ */
+function formatTimeRange(options: { days?: number; date?: string }): string {
+  if (options.date) {
+    return `日期: ${options.date}`;
+  } else {
+    return `最近 ${options.days || 1} 天`;
+  }
+}
 
-  for (const repo of repos) {
-    const commits = getCommitsForRepo(repo, date);
-    allCommits.push(...commits);
-
-    if (commits.length > 0) {
-      if (!startTime || commits[0].date < startTime) {
-        startTime = commits[0].date;
-      }
-      const lastCommit = commits[commits.length - 1];
-      if (!endTime || lastCommit.date > endTime) {
-        endTime = lastCommit.date;
-      }
-    }
+/**
+ * 格式化输出提交记录
+ */
+function formatCommitOutput(commits: GitCommit[]): string {
+  if (commits.length === 0) {
+    return "无提交记录";
   }
 
-  // Sort by date descending
+  let output = "";
+  let currentRepo = "";
+
+  for (const commit of commits) {
+    // 如果换了仓库，显示仓库名
+    if (commit.repo !== currentRepo) {
+      currentRepo = commit.repo;
+      output += `\n📁 ${currentRepo}\n`;
+      output += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+    }
+
+    // 格式化时间
+    const time = commit.date.split(" ")[1]?.slice(0, 8) || "";
+    const subject = commit.subject.length > 50 ? commit.subject.slice(0, 50) + "..." : commit.subject;
+    const filesStr = commit.files.length > 0 ? `[${commit.files.length} files]` : "";
+
+    output += `${time}  ${subject}\n`;
+    if (filesStr) {
+      output += `         ${filesStr} +${commit.additions} -${commit.deletions}\n`;
+    }
+    output += "\n";
+  }
+
+  return output;
+}
+
+function main() {
+  const options = parseArgs();
+  const repos = scanWorkspaceForGitRepos(options);
+
+  if (repos.length === 0) {
+    console.log("未找到任何 Git 仓库");
+    return;
+  }
+
+  console.log(`🔍 搜索 Git 提交记录...`);
+  console.log(`   时间范围: ${formatTimeRange(options)}`);
+  console.log(`   作者: ${options.all ? "全部" : (options.author || "自动检测")}`);
+  console.log(`   扫描仓库: ${repos.length} 个`);
+
+  // 计算时间范围
+  const now = new Date();
+  let since: string;
+  let until: string = `${now.toISOString().split("T")[0]} 23:59:59`;
+
+  if (options.date) {
+    since = `${options.date} 00:00:00`;
+    until = `${options.date} 23:59:59`;
+  } else {
+    const days = options.days || 1;
+    const sinceDate = new Date(now.getTime() - days * 86400 * 1000);
+    since = `${sinceDate.toISOString().split("T")[0]} 00:00:00`;
+  }
+
+  // 收集所有提交
+  const allCommits: GitCommit[] = [];
+
+  for (const repo of repos) {
+    const commits = getCommitsForRepo(repo, since, until, options.all ? undefined : options.author);
+    allCommits.push(...commits);
+  }
+
+  // 按时间排序
   allCommits.sort((a, b) => b.date.localeCompare(a.date));
 
-  const output: Output = {
-    date,
-    time_range: {
-      start: startTime || "",
-      end: endTime || "",
-    },
-    commits: allCommits,
-    total: allCommits.length,
-  };
+  if (allCommits.length === 0) {
+    console.log("❌ 未找到任何提交记录");
+    return;
+  }
 
-  const outputDir = getDateDir(date);
-  ensureDir(outputDir);
-  const outputPath = join(outputDir, "commits.json");
+  // 格式化输出
+  console.log(allCommits.map(v => ({
+    date: v.date,
+    repo: v.repo,
+    message: v.subject,
+    files: v.files.length,
+    additions: v.additions,
+    deletions: v.deletions,
+  })));
 
-  const fs = require("fs");
-  fs.writeFileSync(outputPath, JSON.stringify(output, null, 2));
+  // 统计信息
+  const repoStats = new Map<string, number>();
+  for (const commit of allCommits) {
+    repoStats.set(commit.repo, (repoStats.get(commit.repo) || 0) + 1);
+  }
 
-  console.log(`Output written to ${outputPath}`);
-  console.log(`Total commits: ${output.total}`);
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log(`📊 总计: ${allCommits.length} 条提交`);
+  for (const [repo, count] of repoStats) {
+    console.log(`   ${repo}: ${count} 条`);
+  }
 }
 
 main();
