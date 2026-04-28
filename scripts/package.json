@@ -1,0 +1,7 @@
+{
+  "name": "scripts",
+  "type": "module",
+  "dependencies": {
+    "@clack/prompts": "^0.7.0"
+  }
+}
